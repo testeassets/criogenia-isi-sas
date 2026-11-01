@@ -4,7 +4,9 @@
    - Demonstração (config.js vazio): tudo no navegador (localStorage), para ver o site funcionando sem servidor.
    Formato das linhas igual ao das tabelas do banco (snake_case). */
 const CrioAPI = (() => {
-  const cfg = window.CRIO_CONFIG || {};
+  const cfg = { ...(window.CRIO_CONFIG || {}) };
+  // Aceita a URL colada com /rest/v1/ ou barra no fim: o cliente precisa só da raiz do projeto.
+  if (cfg.supabaseUrl) cfg.supabaseUrl = String(cfg.supabaseUrl).trim().replace(/\/(rest|auth)\/v1\/?.*$/, '').replace(/\/+$/, '');
   const modo = cfg.supabaseUrl && cfg.supabaseAnonKey ? 'supabase' : 'demo';
   let sb = null;
 
