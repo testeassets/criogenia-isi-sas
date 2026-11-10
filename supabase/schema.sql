@@ -141,7 +141,10 @@ begin
     return 'Compartimento ' || m[1] || ' › Rack ' || m[1] || '.' || m[2] || ' › Caixa ' || m[3];
   end if;
   m := regexp_match(caixa, '^r(\d+)/k(\d+)$');
-  if m is null or m[1]::int not between 1 and (e.layout ->> 'racks')::int or m[2]::int not between 1 and nv then raise exception 'Caixa inválida neste equipamento.'; end if;
+  if m is null or m[1]::int not between 1 and (e.layout ->> 'racks')::int then raise exception 'Caixa inválida neste equipamento.'; end if;
+  -- Cada canister pode ter a própria quantidade de caixas (layout.canisters[i].caixas).
+  nv := coalesce((e.layout -> 'canisters' -> (m[1]::int - 1) ->> 'caixas')::int, nv);
+  if m[2]::int not between 1 and nv then raise exception 'Caixa inválida neste equipamento.'; end if;
   return 'Rack ' || m[1] || ' › Caixa ' || m[2];
 end $$;
 
@@ -193,6 +196,35 @@ begin
     limite_temperatura = crio_num(lim, 'maxTemperature'), limite_nivel = crio_num(lim, 'minLevel'), leitura_dias = crio_num(lim, 'readEveryDays')::int
     where id = e.id returning * into e;
   perform crio_reg('Equipamento editado', e, '', null, coalesce(nullif(array_to_string(mud, '; '), ''), 'limites de alerta'));
+  return e.id;
+end $$;
+
+-- Canisters do botijão: cor e quantidade de caixas de cada um. Não deixa sumir caixa com vial guardado.
+create or replace function crio_salvar_canisters(p jsonb) returns uuid language plpgsql security definer set search_path = public as $$
+declare e crio_equipamentos; lista jsonb := p -> 'canisters'; novos jsonb := '[]'; c jsonb; i int := 0; cx int; cor text; v crio_vials; m text[]; ant int;
+begin
+  perform crio_exigir();
+  e := crio_equip((p ->> 'id')::uuid);
+  if e.tipo <> 'tanque' then raise exception 'Só o botijão tem canisters.'; end if;
+  if jsonb_typeof(lista) is distinct from 'array' or jsonb_array_length(lista) not between 1 and 30 then raise exception 'O botijão deve ter de 1 a 30 canisters.'; end if;
+  for c in select value from jsonb_array_elements(lista) loop
+    i := i + 1; cor := lower(coalesce(c ->> 'cor', ''));
+    if cor !~ '^#[0-9a-f]{6}$' then raise exception 'Cor inválida no canister %.', i; end if;
+    if coalesce(c ->> 'caixas', '') !~ '^\d{1,3}$' or (c ->> 'caixas')::int not between 1 and 30 then raise exception 'O canister % deve ter de 1 a 30 caixas.', i; end if;
+    novos := novos || jsonb_build_array(jsonb_build_object('cor', cor, 'caixas', (c ->> 'caixas')::int));
+  end loop;
+  if (select sum((x ->> 'caixas')::int) from jsonb_array_elements(novos) x) > 1000 then raise exception 'Estrutura grande demais (máximo de 1000 caixas por equipamento).'; end if;
+  for v in select * from crio_vials where equipamento_id = e.id and retirado_em is null loop
+    m := regexp_match(v.caixa, '^r(\d+)/k(\d+)$');
+    if m is null or m[1]::int > jsonb_array_length(novos) or m[2]::int > (novos -> (m[1]::int - 1) ->> 'caixas')::int then
+      raise exception 'Há vials guardados em %. Retire ou mova os vials antes de remover essa caixa ou canister.', crio_caixa_local(e, v.caixa); end if;
+  end loop;
+  ant := (e.layout ->> 'racks')::int;
+  update crio_equipamentos set layout = layout || jsonb_build_object('racks', jsonb_array_length(novos),
+      'niveis', (select max((x ->> 'caixas')::int) from jsonb_array_elements(novos) x), 'canisters', novos)
+    where id = e.id returning * into e;
+  perform crio_reg('Canisters editados', e, '', null, ant || ' → ' || jsonb_array_length(novos) || ' canisters; caixas: '
+    || (select string_agg(x ->> 'caixas', ', ' order by n) from jsonb_array_elements(novos) with ordinality t(x, n)));
   return e.id;
 end $$;
 

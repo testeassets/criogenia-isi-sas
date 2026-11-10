@@ -6,6 +6,7 @@ Sala → equipamento aberto → rack → caixa → vial. Arraste para girar, cli
 - Adicionar e excluir ultrafreezers e botijões de N₂ (modelos prontos: ColdLab CL374-86V, Thermo Scientific TSX, Indrel, Sempercrio SC-47, Worthington 20XTB-11M, ou "Outro").
 - Guardar, retirar, mover e editar vials; leituras de temperatura e nível de N₂.
 - Login com Google ou Microsoft. Cada inclusão, exclusão ou alteração fica no **Registro de atividades** com nome, e-mail, data e hora.
+- Cada canister do botijão tem uma cor própria. Em **Editar** no botijão dá para trocar a cor de cada canister, a quantidade de caixas de cada um e pôr ou tirar canisters (o site não deixa sumir caixa com vial guardado).
 - **Exportar Excel**: planilha com as abas Registro, Equipamentos, Vials (inclusive retirados) e Leituras.
 
 Site estático (HTML + CSS + JS, sem build). Sem `config.js` preenchido, ele roda em **modo demonstração**: dados só no navegador e login simulado.
@@ -51,6 +52,10 @@ Site estático (HTML + CSS + JS, sem build). Sem `config.js` preenchido, ele rod
 5. A conta precisa ter e-mail: em contas institucionais, o campo *E-mail* do usuário no Entra ID não pode estar vazio.
 
 Se o login falhar, o site agora mostra o motivo na tela de entrada.
+
+### Atualizações do banco
+Quando o `supabase/schema.sql` mudar (ex.: a edição de canisters, função `crio_salvar_canisters`), cole o arquivo inteiro de novo
+no **SQL Editor** e rode. Ele pode ser rodado várias vezes: não apaga tabelas nem dados.
 
 ### 4. Site (Cloudflare Pages)
 1. Suba esta pasta para um repositório no GitHub.

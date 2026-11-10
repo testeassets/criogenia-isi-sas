@@ -142,7 +142,8 @@ const CrioAPI = (() => {
       return `Compartimento ${m[1]} › Rack ${m[1]}.${m[2]} › Caixa ${m[3]}`;
     }
     const m = /^r(\d+)\/k(\d+)$/.exec(caixa || '');
-    if (!m || +m[1] < 1 || +m[1] > L.racks || +m[2] < 1 || +m[2] > L.niveis) erro('Caixa inválida neste equipamento.');
+    const can = (L.canisters || [])[+(m && m[1]) - 1], nv = can && can.caixas ? can.caixas : L.niveis;
+    if (!m || +m[1] < 1 || +m[1] > L.racks || +m[2] < 1 || +m[2] > nv) erro('Caixa inválida neste equipamento.');
     return `Rack ${m[1]} › Caixa ${m[2]}`;
   }
   const ocupada = (eid, caixa, l, c, exceto) => db.vials.some(v => !v.retirado_em && v.id !== exceto && v.equipamento_id === eid && v.caixa === caixa && v.linha === l && v.coluna === c);
@@ -172,6 +173,22 @@ const CrioAPI = (() => {
       for (const [k, rot, max] of [['nome', 'nome', 120], ['modelo', 'modelo', 120], ['temperatura', 'temperatura', 40]]) { const n = txt(p, k, max); if (e[k] !== n) { mud.push(`${rot}: ${e[k]} → ${n}`); e[k] = n; } }
       e.limite_temperatura = num(lim, 'maxTemperature'); e.limite_nivel = num(lim, 'minLevel'); e.leitura_dias = num(lim, 'readEveryDays');
       reg('Equipamento editado', e, '', null, mud.join('; ') || 'limites de alerta');
+      return e.id;
+    },
+    crio_salvar_canisters(p) {
+      const e = equip(p.id); if (e.tipo !== 'tanque') erro('Só o botijão tem canisters.');
+      const lista = Array.isArray(p.canisters) ? p.canisters : [];
+      if (lista.length < 1 || lista.length > 30) erro('O botijão deve ter de 1 a 30 canisters.');
+      const novos = lista.map((c, i) => { const cx = inteiro(c && c.caixas), cor = String((c && c.cor) || '');
+        if (!/^#[0-9a-fA-F]{6}$/.test(cor)) erro(`Cor inválida no canister ${i + 1}.`);
+        if (cx < 1 || cx > 30) erro(`O canister ${i + 1} deve ter de 1 a 30 caixas.`);
+        return { cor: cor.toLowerCase(), caixas: cx }; });
+      if (novos.reduce((a, c) => a + c.caixas, 0) > 1000) erro('Estrutura grande demais (máximo de 1000 caixas por equipamento).');
+      for (const v of db.vials) { if (v.retirado_em || v.equipamento_id !== e.id) continue; const m = /^r(\d+)\/k(\d+)$/.exec(v.caixa), c = m && novos[+m[1] - 1];
+        if (!c || +m[2] > c.caixas) erro(`Há vials guardados em ${caixaLocal(e, v.caixa)}. Retire ou mova os vials antes de remover essa caixa ou canister.`); }
+      const ant = e.layout.racks;
+      e.layout = { ...e.layout, racks: novos.length, niveis: Math.max(...novos.map(c => c.caixas)), canisters: novos };
+      reg('Canisters editados', e, '', null, `${ant} → ${novos.length} canisters; caixas: ${novos.map(c => c.caixas).join(', ')}`);
       return e.id;
     },
     crio_excluir_equipamento(p) {
