@@ -79,15 +79,27 @@ function giraCryoBuild(r) {
   const equipments = r.equipamentos.map(e => {
     const L = e.layout, base = { id: e.id, tipo: e.tipo, nome: e.nome, modelo: e.modelo, temperatura: e.temperatura, raw: e,
       limits: { maxTemperature: e.limite_temperatura, minLevel: e.limite_nivel, readEveryDays: e.leitura_dias }, ...giraCryoLeituraInfo(e, ultima.get(e.id)) };
+    const cans = e.tipo === 'tanque' ? giraCryoCanisters(e) : null;
     const racks = (pre, nomeRack) => Array.from({ length: L.racks }, (_, i) => {
       const r = i + 1, kids = []; let k = 0;
-      for (let nv = 1; nv <= L.niveis; nv++) for (let f = 1; f <= (e.tipo === 'freezer' ? L.profundidade : 1); f++) { k++; kids.push(caixa(e, `${pre}r${r}/k${k}`, `Caixa ${k}`, nv, e.tipo === 'freezer' ? f : undefined)); }
-      return { id: `${e.id}/${pre}r${r}`, tipo: 'rack', nome: nomeRack(r), children: kids };
+      for (let nv = 1; nv <= (cans ? cans[i].caixas : L.niveis); nv++) for (let f = 1; f <= (e.tipo === 'freezer' ? L.profundidade : 1); f++) { k++; kids.push(caixa(e, `${pre}r${r}/k${k}`, `Caixa ${k}`, nv, e.tipo === 'freezer' ? f : undefined)); }
+      return { id: `${e.id}/${pre}r${r}`, tipo: 'rack', nome: nomeRack(r), cor: cans ? cans[i].cor : '', children: kids };
     });
     if (e.tipo === 'freezer') return { ...base, children: Array.from({ length: L.compartimentos }, (_, i) => ({ id: `${e.id}/c${i + 1}`, tipo: 'compartimento', nome: `Compartimento ${i + 1}`, children: racks(`c${i + 1}/`, r => `Rack ${i + 1}.${r}`) })) };
-    return { ...base, children: racks('', r => `Rack ${r}`) };
+    return { ...base, children: racks('', r => `Canister ${r}`) };
   });
   return { canManage: true, equipments, vials: r.vials };
+}
+// Cada canister (rack do botijão) tem uma cor fixa pelo número, como os canisters anodizados.
+const CANISTER_CORES = ['#e5484d', '#3e7bfa', '#2fa36b', '#f2b311', '#8e4ec6', '#f76b15', '#e93d82', '#12a5b8', '#8a9a1f', '#a0662f'];
+const giraCryoCanisterCor = n => CANISTER_CORES[(n - 1) % CANISTER_CORES.length];
+// Canisters do botijão: cor e quantidade de caixas de cada um (layout.canisters; sem isso, cor padrão e "niveis" caixas).
+function giraCryoCanisters(e) {
+  const L = e.layout || {}, lista = Array.isArray(L.canisters) ? L.canisters : [];
+  return Array.from({ length: L.racks || 0 }, (_, i) => {
+    const c = lista[i] || {};
+    return { cor: /^#[0-9a-f]{6}$/i.test(c.cor || '') ? c.cor : giraCryoCanisterCor(i + 1), caixas: Number.isInteger(c.caixas) && c.caixas > 0 ? c.caixas : L.niveis };
+  });
 }
 function giraCryoLeituraInfo(e, u) {
   const dias = iso => Math.floor((Date.now() - new Date(iso).getTime()) / 864e5);
@@ -169,8 +181,8 @@ function giraCryoTrailHtml() {
 }
 function giraCryoSelected() { const b = state.cryoBox; return b && state.cryoSel ? b.vials.find(v => v.id === state.cryoSel) || null : null; }
 
-function giraCryoLine(id, titulo, sub, c) {
-  return `<button type="button" class="cr-linha" data-action="giraCryoGo" data-arg="${escapeAttr(id)}"><span><b>${escapeHtml(titulo)}</b><small>${escapeHtml(sub)}</small></span><span class="cr-num">${c.ocup}/${c.total}</span><span class="cr-medidor"><i style="width:${giraCryoPct(c)}%"></i></span></button>`;
+function giraCryoLine(id, titulo, sub, c, cor) {
+  return `<button type="button" class="cr-linha" data-action="giraCryoGo" data-arg="${escapeAttr(id)}"><span><b>${cor ? `<span class="cr-ponto" style="--c:${cor}"></span>` : ''}${escapeHtml(titulo)}</b><small>${escapeHtml(sub)}</small></span><span class="cr-num">${c.ocup}/${c.total}</span><span class="cr-medidor"><i style="width:${giraCryoPct(c)}%"></i></span></button>`;
 }
 function giraCryoStats(c) { return `<div class="cr-stats"><div><b>${c.ocup}</b><span>vials</span></div><div><b>${c.total - c.ocup}</b><span>posições livres</span></div><div><b>${c.ocup && !giraCryoPct(c) ? '&lt;1' : giraCryoPct(c)}%</b><span>ocupação</span></div></div>`; }
 function giraCryoPanelHtml() {
@@ -182,11 +194,11 @@ function giraCryoPanelHtml() {
     const e = ult.raw, quem = `<p class="gds-muted" style="font-size:13px">Adicionado por ${escapeHtml(e.criado_por || '—')} em ${escapeHtml(dataHora(e.criado_em))}</p>`;
     const acoes = d.canManage ? `<div class="cr-acoes"><button type="button" class="btn soft" data-action="giraCryoEquipmentForm" data-arg="${escapeAttr(ult.id)}">Editar</button><button type="button" class="btn soft" data-action="giraCryoDeleteEquipment" data-arg="${escapeAttr(ult.id)}">Excluir</button></div>` : '';
     const grupos = ult.tipo === 'freezer' ? ult.children.map(cp => `<h3>${escapeHtml(cp.nome)}</h3><div class="cr-lista">${cp.children.map(r => giraCryoLine(r.id, r.nome, giraCryoSummary(r), giraCryoCount(r))).join('')}</div>`).join('')
-      : `<div class="cr-lista">${ult.children.map(r => giraCryoLine(r.id, r.nome, giraCryoSummary(r), giraCryoCount(r))).join('')}</div>`;
+      : `<div class="cr-lista">${ult.children.map(r => giraCryoLine(r.id, r.nome, giraCryoSummary(r), giraCryoCount(r), r.cor)).join('')}</div>`;
     return `<div><h2>${escapeHtml(ult.nome)}</h2><p class="gds-muted">${escapeHtml([ult.modelo, ult.temperatura].filter(Boolean).join(' · '))}</p>${quem}</div>${giraCryoStats(c)}${giraCryoRegistroHtml(ult)}${acoes}${grupos}`;
   }
   if (ult.tipo === 'rack') {
-    return `<div><h2>${escapeHtml(ult.nome)}</h2><p class="gds-muted">${escapeHtml(idx.get(ult.id).eq.nome)}</p></div>${giraCryoStats(c)}<div class="cr-lista">${ult.children.map(cx => giraCryoLine(cx.id, cx.nome + (cx.ocupadas ? ' · ' + giraCryoBoxTitle(cx) : ''), giraCryoBoxWhere(cx, idx), giraCryoCount(cx))).join('')}</div>`;
+    return `<div><h2>${ult.cor ? `<span class="cr-ponto cr-ponto-g" style="--c:${ult.cor}"></span>` : ''}${escapeHtml(ult.nome)}</h2><p class="gds-muted">${escapeHtml(idx.get(ult.id).eq.nome)}</p></div>${giraCryoStats(c)}<div class="cr-lista">${ult.children.map(cx => giraCryoLine(cx.id, cx.nome + (cx.ocupadas ? ' · ' + giraCryoBoxTitle(cx) : ''), giraCryoBoxWhere(cx, idx), giraCryoCount(cx))).join('')}</div>`;
   }
   const b = state.cryoBox && state.cryoBox.id === ult.id ? state.cryoBox : null, v = giraCryoSelected(), pick = state.cryoPick || [];
   let h = `<div><h2>${escapeHtml(ult.nome)}</h2><p class="gds-muted">${escapeHtml(giraCryoBoxTitle(ult))} · grade ${ult.linhas}×${ult.colunas}</p></div>${giraCryoStats(c)}`;
@@ -268,14 +280,14 @@ function giraCryoSceneTank(eq) {
   corpo.appendChild(giraCryoPx(giraCryoEl('div', 'cr-ln2'), { width: 2 * R - 20, height: 2 * R - 20, left: -(R - 10), top: -(R - 10), transform: 'translateY(-30px) rotateX(90deg)' }));
   racks.forEach((rk, i) => {
     const a = i * 2 * Math.PI / Math.max(n, 1) + Math.PI / 6, c = giraCryoCount(rk), g = giraCryoGroup(Math.cos(a) * (R - 58), -hc / 2 - 8, Math.sin(a) * (R - 58), 'cr-rack-n2');
-    g.dataset.go = rk.id; g.style.transform += ` rotateY(${-a * 180 / Math.PI + 90}deg)`;
-    g.appendChild(giraCryoCuboid({ w: 64, h: hc, d: 68, faces: { top: `<span class="cr-can-n">${escapeHtml(rk.nome.replace(/^Rack\s*/, ''))}<small>${c.ocup}</small></span>` } }));
+    g.dataset.go = rk.id; g.style.transform += ` rotateY(${-a * 180 / Math.PI + 90}deg)`; g.style.setProperty('--can', rk.cor);
+    g.appendChild(giraCryoCuboid({ w: 64, h: hc, d: 68, faces: { top: `<span class="cr-can-n">${escapeHtml(rk.nome.replace(/^(Rack|Canister)\s*/, ''))}<small>${c.ocup}</small></span>` } }));
     g.appendChild(giraCryoCylinder({ r: 3, h: Hc - hc + 30, n: 6, y: -(hc / 2) - (Hc - hc + 30) / 2, z: -30, cls: 'cr-alca', topo: false }).c);
     corpo.appendChild(g);
   });
   const v = giraCryoVapor(); if (v) { v.style.transform = `translateY(${-Hc - 45}px) rotateX(90deg)`; corpo.appendChild(v); }
   w.appendChild(corpo);
-  return { world: w, rx: -24, ry: -18, tam: [460, 640], dy: -40, dica: 'Vista em corte do botijão. Clique num rack para erguê-lo.' };
+  return { world: w, rx: -24, ry: -18, tam: [460, 640], dy: -40, dica: 'Vista em corte do botijão. Clique num canister para erguê-lo.' };
 }
 function giraCryoBoxMini(cx, BW, BH, BD, x, y, z) {
   const c = giraCryoCount(cx), et = `<div class="cr-cx-et"><b>${escapeHtml(cx.nome.replace(/^Caixa\s*/, 'C'))}</b><span>${escapeHtml(giraCryoBoxTitle(cx))}</span><em>${c.ocup}/${c.total}</em></div>`;
@@ -288,11 +300,12 @@ function giraCryoSceneRack(rack, eq) {
   const w = giraCryoEl('div', 'cr-world'), cx = rack.children;
   if (eq.tipo === 'tanque') {
     const BW = 120, BH = 44, BD = 120, N = Math.max(1, ...cx.map(c => c.nivel || 1)), H = N * (BH + 10) + 20;
-    w.appendChild(giraCryoCuboid({ w: BW + 16, h: H, d: BD + 16, cls: 'cr-frame', faces: { front: false, top: false } }));
-    w.appendChild(giraCryoCylinder({ r: 4, h: 170, n: 8, cls: 'cr-alca', y: -H / 2 - 85, z: -(BD + 16) / 2 + 4, topo: false }).c);
+    w.style.setProperty('--can', rack.cor);
+    w.appendChild(giraCryoCuboid({ w: BW + 16, h: H, d: BD + 16, cls: 'cr-frame cr-frame-can', faces: { front: false, top: false } }));
+    w.appendChild(giraCryoCylinder({ r: 4, h: 170, n: 8, cls: 'cr-alca cr-alca-can', y: -H / 2 - 85, z: -(BD + 16) / 2 + 4, topo: false }).c);
     cx.forEach(c => w.appendChild(giraCryoBoxMini(c, BW, BH, BD, 0, H / 2 - 10 - ((c.nivel || 1) - 1) * (BH + 10) - BH / 2, 0)));
     const v = giraCryoVapor(); if (v) { v.style.transform = `translateY(${H / 2}px) rotateX(90deg)`; w.appendChild(v); }
-    return { world: w, rx: -16, ry: -28, tam: [420, H + 220], dy: 40, dica: 'Rack erguido do botijão. A caixa 1 fica no fundo. Clique na caixa.' };
+    return { world: w, rx: -16, ry: -28, tam: [420, H + 220], dy: 40, dica: 'Canister erguido do botijão. A caixa 1 fica no fundo. Clique na caixa.' };
   }
   const BW = 140, BH = 54, BD = 140, NV = Math.max(1, ...cx.map(c => c.nivel || 1)), NF = Math.max(1, ...cx.map(c => c.profundidade || 1));
   const W = BW + 16, H = NV * (BH + 10) + 10, D = NF * (BD + 8) + 10;
@@ -455,18 +468,18 @@ function giraCryoFlyTo(caixaId, amostra) {
 }
 
 // ───────────── ações (cada uma vira uma linha no registro, com o nome de quem fez) ─────────────
-function giraCryoMutate(action, payload, erroId, depois) {
+function giraCryoMutate(action, payload, erroId, depois, extra) {
   setModalBusy(true);
-  CrioAPI.acao(action, payload).then(() => giraLoadCryo(() => {
+  CrioAPI.acao(action, payload).then(() => extra && extra()).then(() => giraLoadCryo(() => {
     setModalBusy(false); closeModal();
     if (state.cryoSel && !giraCryoSelected()) state.cryoSel = null;
     state.cryoPick = [];
     if (depois) depois();
     if (!document.getElementById('cryoStage') || !state.cryo.equipments.length) giraRefreshCryo(); else { giraCryoMount(null, 'keep'); giraCryoRefreshPanel(); }
     toast(CRIO_MSG[action] || 'Salvo.');
-  })).catch(e => { setModalBusy(false); const el = document.getElementById(erroId); if (el) el.textContent = e.message || String(e); else toast(e.message || String(e), true); });
+  })).catch(e => { setModalBusy(false); if (/crio_salvar_canisters/.test(e.message || '')) { e = new Error('O banco ainda não tem a função de canisters: rode de novo o supabase/schema.sql no SQL Editor do Supabase.'); giraLoadCryo(); } const el = document.getElementById(erroId); if (el) el.textContent = e.message || String(e); else toast(e.message || String(e), true); });
 }
-const CRIO_MSG = { crio_salvar_equipamento: 'Equipamento salvo.', crio_excluir_equipamento: 'Equipamento excluído.', crio_guardar_vials: 'Vials guardados.', crio_editar_vial: 'Vial atualizado.',
+const CRIO_MSG = { crio_salvar_equipamento: 'Equipamento salvo.', crio_salvar_canisters: 'Canisters salvos.', crio_excluir_equipamento: 'Equipamento excluído.', crio_guardar_vials: 'Vials guardados.', crio_editar_vial: 'Vial atualizado.',
   crio_retirar_vial: 'Vial retirado.', crio_mover_vial: 'Vial movido.', crio_registrar_leitura: 'Leitura registrada.' };
 function giraCryoVialFields(v) {
   const hoje = new Date().toISOString().slice(0, 10), cats = CRIO_CATEGORIAS.concat(v && v.categoria && !CRIO_CATEGORIAS.includes(v.categoria) ? [v.categoria] : []);
@@ -548,11 +561,19 @@ function giraCryoEquipmentForm(id, presetInicial) {
       <div class="gds-form-pair"><div class="field"><label for="crEqModelo">Modelo</label><input id="crEqModelo" maxlength="120" value="${escapeAttr(e.modelo || '')}"></div><div class="field"><label for="crEqTemp">Temperatura</label><input id="crEqTemp" maxlength="40" value="${escapeAttr(e.temperatura || '')}"></div></div>
       <fieldset class="gds-check-group"><legend>Alertas do registro</legend><div class="gds-form-pair">${tanque ? `<div class="field"><label for="crLimNivel">Nível mínimo de N₂ (cm)</label><input id="crLimNivel" type="text" inputmode="decimal" value="${escapeAttr(vl(l.minLevel))}" placeholder="ex.: 20"></div>`
         : `<div class="field"><label for="crLimTemp">Temperatura máxima (°C)</label><input id="crLimTemp" type="text" inputmode="decimal" value="${escapeAttr(vl(l.maxTemperature))}" placeholder="ex.: -70"></div>`}<div class="field"><label for="crLimDias">Ler a cada (dias)</label><input id="crLimDias" type="number" min="1" max="60" value="${escapeAttr(vl(l.readEveryDays))}" placeholder="sem lembrete"></div></div>
-      <p class="gds-muted">Leitura fora do limite fica marcada em vermelho. Com "ler a cada", o equipamento aparece como atrasado quando passar do prazo sem leitura.</p></fieldset><p id="crErro" role="alert"></p></div>`, () => {
+      <p class="gds-muted">Leitura fora do limite fica marcada em vermelho. Com "ler a cada", o equipamento aparece como atrasado quando passar do prazo sem leitura.</p></fieldset>
+      ${tanque ? `<fieldset class="gds-check-group"><legend>Canisters</legend><p class="gds-muted">Cor e quantidade de caixas de cada canister. A caixa 1 fica no fundo.</p><div class="cr-cans" id="crCans"></div>
+        <div class="cr-acoes"><button type="button" class="btn soft" id="crCanMais">${ICONE.mais}Canister</button><button type="button" class="btn soft" id="crCanMenos">Remover o último</button></div></fieldset>` : ''}
+      <p id="crErro" role="alert"></p></div>`, () => {
       const val = k => { const x = document.getElementById(k); return x ? x.value.trim() : ''; };
-      giraCryoMutate('crio_salvar_equipamento', { id: e.id, nome: val('crEqNome'), modelo: val('crEqModelo'), temperatura: val('crEqTemp'),
-        limits: { maxTemperature: tanque ? (l.maxTemperature ?? '') : val('crLimTemp'), minLevel: tanque ? val('crLimNivel') : (l.minLevel ?? ''), readEveryDays: val('crLimDias') } }, 'crErro');
+      const payload = { id: e.id, nome: val('crEqNome'), modelo: val('crEqModelo'), temperatura: val('crEqTemp'),
+        limits: { maxTemperature: tanque ? (l.maxTemperature ?? '') : val('crLimTemp'), minLevel: tanque ? val('crLimNivel') : (l.minLevel ?? ''), readEveryDays: val('crLimDias') } };
+      if (!tanque) return giraCryoMutate('crio_salvar_equipamento', payload, 'crErro');
+      const cans = [...document.querySelectorAll('#crCans .cr-can-linha')].map(li => ({ cor: li.querySelector('input[type=color]').value, caixas: Number(li.querySelector('input[type=number]').value) }));
+      const antes = giraCryoCanisters(e.raw), mudou = cans.length !== antes.length || cans.some((c, i) => c.cor.toLowerCase() !== antes[i].cor.toLowerCase() || c.caixas !== antes[i].caixas);
+      giraCryoMutate('crio_salvar_equipamento', payload, 'crErro', null, mudou ? () => CrioAPI.acao('crio_salvar_canisters', { id: e.id, canisters: cans }) : null);
     }, 'Salvar');
+    if (tanque) giraCryoCanForm(e);
     return;
   }
   const num = (k, l, v) => `<div class="field"><label for="crL${k}">${l}</label><input id="crL${k}" type="number" min="1" max="${/linhas|colunas/.test(k) ? 12 : 30}" value="${v}"></div>`;
@@ -573,6 +594,22 @@ function giraCryoEquipmentForm(id, presetInicial) {
     document.getElementById('crEqNome').value = p.nome; document.getElementById('crEqModelo').value = p.modelo; document.getElementById('crEqTemp').value = p.temperatura;
     for (const k of ['compartimentos', 'racks', 'niveis', 'profundidade', 'linhas', 'colunas']) document.getElementById('crL' + k).value = p.layout[k] || 1; giraCryoFormKind(); };
   preset.addEventListener('change', aplicar); tipo.addEventListener('change', giraCryoFormKind); aplicar();
+}
+// Linhas do formulário de canisters (cor + caixas), com botões para pôr e tirar canister.
+function giraCryoCanForm(e) {
+  const box = document.getElementById('crCans'), cheias = new Map();
+  for (const r of e.children) cheias.set(r.id.split('/').pop(), Math.max(0, ...r.children.filter(cx => cx.ocupadas).map(cx => cx.nivel)));
+  const linha = (i, c) => { const usado = cheias.get('r' + (i + 1)) || 0;
+    return `<div class="cr-can-linha"><span class="cr-ponto cr-ponto-g" style="--c:${c.cor}"></span><b>Canister ${i + 1}</b><label>Cor <input type="color" value="${c.cor}" aria-label="Cor do canister ${i + 1}"></label>
+      <label>Caixas <input type="number" min="${Math.max(1, usado)}" max="30" value="${c.caixas}" aria-label="Caixas do canister ${i + 1}"></label>${usado ? `<small class="gds-muted">com vials até a caixa ${usado}</small>` : ''}</div>`; };
+  box.innerHTML = giraCryoCanisters(e.raw).map((c, i) => linha(i, c)).join('');
+  box.addEventListener('input', ev => { if (ev.target.type === 'color') ev.target.closest('.cr-can-linha').querySelector('.cr-ponto').style.setProperty('--c', ev.target.value); });
+  const erro = t => { document.getElementById('crErro').textContent = t; };
+  document.getElementById('crCanMais').onclick = () => { const n = box.children.length; if (n >= 30) return erro('Máximo de 30 canisters.');
+    const ult = box.lastElementChild, cx = ult ? Number(ult.querySelector('input[type=number]').value) || 1 : 5;
+    box.insertAdjacentHTML('beforeend', linha(n, { cor: giraCryoCanisterCor(n + 1), caixas: cx })); erro(''); };
+  document.getElementById('crCanMenos').onclick = () => { const n = box.children.length; if (n <= 1) return erro('O botijão precisa de pelo menos 1 canister.');
+    if (cheias.get('r' + n)) return erro(`O canister ${n} tem vials guardados. Retire ou mova os vials antes de removê-lo.`); box.lastElementChild.remove(); erro(''); };
 }
 // O botijão não tem compartimentos nem profundidade: os campos somem e valem 1.
 function giraCryoFormKind() {
@@ -654,9 +691,9 @@ async function crioExportar() {
   try {
     const d = await CrioAPI.exportar(), porId = new Map(d.equipamentos.map(e => [e.id, e])), D = s => s ? new Date(s) : null, Dd = s => s ? new Date(s + 'T12:00:00') : null;
     const ativos = new Map(); for (const v of d.vials) if (!v.retirado_em) ativos.set(v.equipamento_id, (ativos.get(v.equipamento_id) || 0) + 1);
-    const equip = d.equipamentos.map(e => { const L = e.layout, cx = L.compartimentos * L.racks * L.niveis * L.profundidade, tot = cx * L.linhas * L.colunas, oc = ativos.get(e.id) || 0;
+    const equip = d.equipamentos.map(e => { const L = e.layout, cans = e.tipo === 'tanque' ? giraCryoCanisters(e) : null, cx = cans ? cans.reduce((a, c) => a + c.caixas, 0) : L.compartimentos * L.racks * L.niveis * L.profundidade, tot = cx * L.linhas * L.colunas, oc = ativos.get(e.id) || 0;
       return { 'Equipamento': e.nome, 'Tipo': e.tipo === 'freezer' ? 'Ultrafreezer' : 'Botijão de N₂', 'Modelo': e.modelo, 'Temperatura': e.temperatura,
-        'Estrutura': e.tipo === 'freezer' ? `${L.compartimentos} compartimentos × ${L.racks} racks × ${L.niveis * L.profundidade} caixas` : `${L.racks} racks × ${L.niveis} caixas`,
+        'Estrutura': e.tipo === 'freezer' ? `${L.compartimentos} compartimentos × ${L.racks} racks × ${L.niveis * L.profundidade} caixas` : `${L.racks} canisters (caixas: ${cans.map(c => c.caixas).join(', ')})`,
         'Caixas': cx, 'Grade da caixa': `${L.linhas}×${L.colunas}`, 'Vials guardados': oc, 'Posições livres': tot - oc, 'Ocupação (%)': tot ? Math.round(1000 * oc / tot) / 10 : 0,
         'Situação': e.excluido_em ? 'Excluído' : 'Ativo', 'Adicionado por': e.criado_por, 'E-mail (adição)': e.criado_email, 'Adicionado em': D(e.criado_em),
         'Excluído por': e.excluido_por || '', 'E-mail (exclusão)': e.excluido_email || '', 'Excluído em': D(e.excluido_em) }; });
