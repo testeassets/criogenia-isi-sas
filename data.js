@@ -22,12 +22,41 @@ const CrioAPI = (() => {
       if (data.length < 1000) return out;
     }
   }
+  function parametrosRetorno() {
+    const out = {}, u = new URL(location.href);
+    if (u.hash.length > 1) new URLSearchParams(u.hash.slice(1)).forEach((v, k) => { out[k] = v; });
+    u.searchParams.forEach((v, k) => { out[k] = v; });
+    return out;
+  }
+  function limparEndereco() {
+    try { history.replaceState(null, '', location.origin + location.pathname); } catch { /* nada */ }
+  }
+  function mensagemLogin(bruto) {
+    const t = String(bruto).replace(/\+/g, ' ');
+    if (/getting user email|email.*external provider/i.test(t))
+      return 'Não foi possível entrar: a conta Microsoft não enviou o e-mail para o site. O administrador precisa liberar o e-mail no registro do aplicativo no Azure (veja o README, passo "Login Microsoft"). Detalhe: ' + t;
+    if (/code verifier|code_verifier|flow state|bad_code_verifier/i.test(t))
+      return 'Não foi possível concluir o login porque ele começou em outro endereço ou outra aba. Abra o site pelo endereço principal e tente de novo. Detalhe: ' + t;
+    if (/redirect|not allowed/i.test(t))
+      return 'O endereço deste site não está liberado no Supabase (Authentication → URL Configuration → Redirect URLs). Detalhe: ' + t;
+    return 'Não foi possível entrar: ' + t;
+  }
   const supa = {
     async iniciar() {
+      // Na volta do Google/Microsoft o endereço traz ?code=… (deu certo) ou ?error=…&error_description=… (deu errado).
+      // Lê antes de criar o cliente, porque ele limpa o endereço.
+      const volta = parametrosRetorno();
       sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, detectSessionInUrl: true, flowType: 'pkce' } });
+      const { error: erroIni } = await sb.auth.initialize();
       const { data } = await sb.auth.getSession();
       sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') location.reload(); });
-      if (!data.session) return null;
+      if (volta.code || volta.error || volta.error_description) limparEndereco();
+      if (!data.session) {
+        // Antes o erro era engolido e o site só voltava à tela de login, sem dizer nada.
+        const bruto = volta.error_description || volta.error || (erroIni && erroIni.message) || (volta.code ? 'o código de login não pôde ser trocado por uma sessão' : '');
+        if (bruto) throw new Error(mensagemLogin(bruto));
+        return null;
+      }
       const { data: eu, error } = await sb.rpc('crio_eu');
       if (error) throw new Error(error.message);
       return { ...eu, provedor: data.session.user.app_metadata?.provider || '' };

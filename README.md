@@ -43,6 +43,14 @@ Site estático (HTML + CSS + JS, sem build). Sem `config.js` preenchido, ele rod
 2. Em *Certificados e segredos*, crie um segredo do cliente.
 3. No Supabase → **Authentication → Providers → Azure**: ative, cole o *Application (client) ID* e o segredo.
    *Azure Tenant URL*: `https://login.microsoftonline.com/common` (ou o ID do locatário do SENAI para aceitar só contas institucionais).
+4. **Libere o e-mail no token** (sem isso o login volta para a tela inicial com o erro
+   *"Error getting user email from external provider"*): no registro do aplicativo → **Configuração de token →
+   Adicionar declaração opcional → ID**, marque `email` e `xms_edov` e aceite adicionar a permissão do Microsoft Graph
+   (`email`). Em **Permissões de API**, confira que `email`, `openid` e `profile` (Microsoft Graph, delegadas) estão lá
+   e clique em *Conceder consentimento do administrador* se aparecer o aviso.
+5. A conta precisa ter e-mail: em contas institucionais, o campo *E-mail* do usuário no Entra ID não pode estar vazio.
+
+Se o login falhar, o site agora mostra o motivo na tela de entrada.
 
 ### 4. Site (Cloudflare Pages)
 1. Suba esta pasta para um repositório no GitHub.
